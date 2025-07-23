@@ -1,306 +1,208 @@
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>أداة فك تشفير وورد (الإصدار النهائي)</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700&display=swap" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
-    <style>
-        body { font-family: 'Tajawal', sans-serif; }
-        .step-card { transition: all 0.3s ease-in-out; }
-        .step-card.active { border-color: #3b82f6; }
-    </style>
-</head>
-<body class="bg-gray-200 flex items-center justify-center min-h-screen p-4">
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+import win32com.client
+import multiprocessing
+import pythoncom
+import os
+import time
 
-    <div class="w-full max-w-3xl mx-auto bg-white rounded-2xl shadow-2xl p-8 space-y-8">
+# ==============================================================================
+# Word Password Cracker - Professional Compatibility Version
+# Author: Gemini
+# Description: This version uses the Word COM interface, which is slower but
+#              highly compatible with all Word versions, including Office 365.
+#              This is the most reliable method for this specific use case.
+#
+# Required libraries: pip install pywin32
+# ==============================================================================
+
+
+class WordCrackerApp:
+    def __init__(self, root):
+        """
+        Initializes the GUI application.
+        """
+        self.root = root
+        self.root.title("أداة فك تشفير وورد (نسخة التوافق الاحترافية)")
+        self.root.geometry("600x480")
+        self.root.resizable(False, False)
+        self.root.configure(bg="#f0f0f0")
+
+        # --- State Variables ---
+        self.file_path = tk.StringVar()
+        self.status_text = tk.StringVar()
+        self.password_found_flag = multiprocessing.Event()
+        self.progress_counter = multiprocessing.Value('i', 0)
+        self.found_password_queue = multiprocessing.Queue()
+        self.processes = []
+        self.total_passwords = 10000
+        self.is_running = False
+
+        # --- GUI Setup ---
+        self.create_widgets()
+
+    def create_widgets(self):
+        """
+        Creates and arranges all the GUI elements.
+        """
+        main_frame = tk.Frame(self.root, bg="#f0f0f0", padx=20, pady=20)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        file_frame = tk.LabelFrame(main_frame, text="الخطوة 1: اختر الملف", bg="#f0f0f0", fg="#333", font=("Segoe UI", 12, "bold"), padx=10, pady=10)
+        file_frame.pack(fill=tk.X, pady=(0, 20))
+        file_entry = tk.Entry(file_frame, textvariable=self.file_path, state="readonly", font=("Segoe UI", 10), width=50)
+        file_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=5)
+        self.browse_button = tk.Button(file_frame, text="... تصفح", command=self.browse_file, font=("Segoe UI", 10, "bold"), bg="#0078d4", fg="white", relief=tk.FLAT, padx=10)
+        self.browse_button.pack(side=tk.RIGHT, padx=(10, 0))
+
+        control_frame = tk.Frame(main_frame, bg="#f0f0f0")
+        control_frame.pack(fill=tk.X, pady=(0, 20))
+        self.start_button = tk.Button(control_frame, text="الخطوة 2: ابدأ البحث", command=self.start_cracking, font=("Segoe UI", 12, "bold"), bg="#28a745", fg="white", relief=tk.FLAT, padx=20, pady=10)
+        self.start_button.pack(side=tk.LEFT)
+        self.stop_button = tk.Button(control_frame, text="إيقاف", command=self.stop_cracking, font=("Segoe UI", 12, "bold"), bg="#dc3545", fg="white", relief=tk.FLAT, padx=20, pady=10, state="disabled")
+        self.stop_button.pack(side=tk.RIGHT)
+
+        status_frame = tk.LabelFrame(main_frame, text="الحالة", bg="#f0f0f0", fg="#333", font=("Segoe UI", 12, "bold"), padx=10, pady=10)
+        status_frame.pack(fill=tk.BOTH, expand=True)
+        self.status_label = tk.Label(status_frame, textvariable=self.status_text, font=("Segoe UI", 11), wraplength=500, justify=tk.RIGHT, bg="#f0f0f0", fg="#333")
+        self.status_label.pack(anchor="ne", pady=5)
+        self.status_text.set("في انتظار اختيار ملف لبدء العملية...")
+        self.progress_bar = ttk.Progressbar(status_frame, orient="horizontal", length=100, mode="determinate", maximum=self.total_passwords)
+        self.progress_bar.pack(fill=tk.X, pady=(15, 0))
+
+    def browse_file(self):
+        path = filedialog.askopenfilename(title="اختر ملف وورد", filetypes=(("Word Documents", "*.docx;*.doc"), ("All files", "*.*")))
+        if path:
+            self.file_path.set(path)
+            self.status_text.set(f"تم اختيار الملف: {os.path.basename(path)}")
+
+    def start_cracking(self):
+        if self.is_running: return
+        if not self.file_path.get() or not os.path.exists(self.file_path.get()):
+            messagebox.showerror("خطأ", "الرجاء اختيار ملف وورد صالح أولاً.")
+            return
         
-        <div class="text-center">
-            <h1 class="text-4xl font-bold text-gray-800">برنامج فك التشفير النهائي</h1>
-            <p class="text-gray-600 mt-2">يعمل مباشرة في المتصفح بأحدث التقنيات</p>
-        </div>
+        try:
+            # Test if Word COM object can be created
+            win32com.client.Dispatch("Word.Application").Quit()
+        except pythoncom.com_error:
+            messagebox.showerror("خطأ فادح", "لا يمكن العثور على برنامج مايكروسوفت وورد.\nالرجاء التأكد من تثبيته على جهازك.")
+            return
 
-        <!-- Step 1: Important Preparation -->
-        <div id="step1" class="step-card border-2 border-gray-300 rounded-lg p-6 bg-gray-50">
-            <div class="flex items-center">
-                <div class="bg-blue-500 text-white rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold">1</div>
-                <h2 class="text-2xl font-bold text-gray-800 mr-4">الخطوة الأولى: تجهيز الملف (مهم جداً)</h2>
-            </div>
-            <p class="mt-4 text-gray-700">
-                لضمان أقصى سرعة وتوافق، يتطلب هذا البرنامج أن يكون الملف في صيغة "نظيفة".
-                افتح ملفك في برنامج وورد، ثم اتبع المسار التالي بدقة:
-            </p>
-            <div class="mt-4 bg-white p-3 rounded-md border text-gray-800 text-center font-semibold">
-                ملف (File) &larr; حفظ نسخة (Save a Copy) &larr; هذا الكمبيوتر (This PC)
-            </div>
-            <p class="mt-3 text-sm text-gray-600">
-                احفظ الملف باسم جديد على سطح المكتب. استخدم هذه النسخة الجديدة في الخطوة التالية.
-            </p>
-        </div>
+        self.is_running = True
+        self.toggle_controls(is_running=True)
+        self.password_found_flag.clear()
+        self.progress_counter.value = 0
+        self.progress_bar['value'] = 0
 
-        <!-- Step 2: File Upload -->
-        <div id="step2" class="step-card border-2 border-gray-300 rounded-lg p-6 bg-gray-50 opacity-50">
-             <div class="flex items-center">
-                <div class="bg-gray-400 text-white rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold">2</div>
-                <h2 class="text-2xl font-bold text-gray-800 mr-4">الخطوة الثانية: رفع الملف "النظيف"</h2>
-            </div>
-            <div class="mt-4">
-                <input id="file-upload" type="file" class="hidden" accept=".docx" />
-                <button id="upload-button" class="w-full bg-gray-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-gray-700 transition-all shadow-md text-lg">
-                    اختر الملف الذي قمت بحفظه للتو
-                </button>
-                <p id="file-name" class="text-center mt-3 text-green-700 font-semibold"></p>
-            </div>
-        </div>
+        num_processes = multiprocessing.cpu_count()
+        self.status_text.set(f"بدء البحث باستخدام {num_processes} من أنوية المعالج (وضع التوافق)...")
         
-        <!-- Step 3: Start Cracking -->
-        <div id="step3" class="step-card border-2 border-gray-300 rounded-lg p-6 bg-gray-50 opacity-50">
-             <div class="flex items-center">
-                <div class="bg-gray-400 text-white rounded-full w-10 h-10 flex items-center justify-center text-xl font-bold">3</div>
-                <h2 class="text-2xl font-bold text-gray-800 mr-4">الخطوة الثالثة: بدء البحث</h2>
-            </div>
-            <div class="mt-4">
-                <button id="start-button" class="w-full bg-blue-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-all shadow-md text-lg" disabled>
-                    ابدأ البحث فائق السرعة
-                </button>
-            </div>
-        </div>
+        chunk_size = self.total_passwords // num_processes
+        self.processes = []
+        for i in range(num_processes):
+            start = i * chunk_size
+            end = (i + 1) * chunk_size if i != num_processes - 1 else self.total_passwords
+            p = multiprocessing.Process(target=password_worker_com, args=(self.file_path.get(), start, end, self.password_found_flag, self.found_password_queue, self.progress_counter))
+            self.processes.append(p)
+            p.start()
 
-        <!-- Status & Result Area -->
-        <div id="status-area" class="pt-4 space-y-4"></div>
+        self.root.after(500, self.check_for_result)
 
-    </div>
+    def check_for_result(self):
+        if not self.is_running: return
 
-<script>
-// ==============================================================================
-// Word Password Cracker - The Final JavaScript Version
-// Author: Gemini
-// Description: A user-guided, robust in-browser password cracker for .docx files.
-// ==============================================================================
+        self.progress_bar['value'] = self.progress_counter.value
 
-const step1 = document.getElementById('step1');
-const step2 = document.getElementById('step2');
-const step3 = document.getElementById('step3');
-const fileUpload = document.getElementById('file-upload');
-const uploadButton = document.getElementById('upload-button');
-const fileNameDisplay = document.getElementById('file-name');
-const startButton = document.getElementById('start-button');
-const statusArea = document.getElementById('status-area');
+        if self.password_found_flag.is_set():
+            try:
+                found_pass = self.found_password_queue.get(timeout=0.1)
+                self.status_text.set(f"🎉 تم العثور على كلمة السر بنجاح: {found_pass}")
+                messagebox.showinfo("نجاح!", f"كلمة السر الصحيحة هي: {found_pass}")
+                self.progress_bar['value'] = self.total_passwords
+                self.stop_cracking(force=True)
+            except Exception:
+                self.root.after(100, self.check_for_result)
+            return
 
-let docxFile = null;
-let workers = [];
-let startTime;
-const totalPasswords = 10000;
-let checkedPasswords = 0;
-let passwordFound = false;
-
-// --- UI Logic ---
-function activateStep(stepElement) {
-    document.querySelectorAll('.step-card').forEach(card => {
-        card.classList.remove('active');
-        card.classList.add('opacity-50');
-    });
-    stepElement.classList.add('active');
-    stepElement.classList.remove('opacity-50');
-    const stepNumberDiv = stepElement.querySelector('.flex > div');
-    if (stepNumberDiv) {
-        stepNumberDiv.classList.remove('bg-gray-400');
-        stepNumberDiv.classList.add('bg-blue-500');
-    }
-}
-
-uploadButton.addEventListener('click', () => fileUpload.click());
-
-fileUpload.addEventListener('change', (event) => {
-    const file = event.target.files[0];
-    if (file && file.name.toLowerCase().endsWith('.docx')) {
-        docxFile = file;
-        fileNameDisplay.textContent = `تم اختيار: ${file.name}`;
-        startButton.disabled = false;
-        activateStep(step3);
-        statusArea.innerHTML = ''; // Clear previous results
-    } else {
-        alert("الرجاء اختيار ملف بامتداد .docx فقط.");
-        fileUpload.value = '';
-    }
-});
-
-startButton.addEventListener('click', async () => {
-    if (!docxFile) return;
-    
-    // Reset state
-    startButton.disabled = true;
-    fileNameDisplay.textContent = '';
-    passwordFound = false;
-    checkedPasswords = 0;
-    
-    renderStatusUI();
-    const statusMessage = document.getElementById('status-message');
-    
-    statusMessage.textContent = 'جاري قراءة الملف واستخلاص معلومات التشفير...';
-
-    try {
-        const buffer = await docxFile.arrayBuffer();
-        const jszip = new JSZip();
-        const zip = await jszip.loadAsync(buffer);
+        if not any(p.is_alive() for p in self.processes):
+            self.is_running = False
+            if not self.password_found_flag.is_set():
+                self.status_text.set("اكتمل البحث. للأسف، لم يتم العثور على كلمة سر رقمية من 4 خانات.")
+                messagebox.showwarning("لم يتم العثور", "لم يتم العثور على كلمة السر ضمن نطاق الأرقام (0000-9999).")
+            self.toggle_controls(is_running=False)
+            return
         
-        const encryptionInfoFile = zip.file('EncryptionInfo');
-        if (!encryptionInfoFile) throw new Error("الملف غير مشفر.");
+        progress_percent = (self.progress_counter.value / self.total_passwords) * 100
+        self.status_text.set(f"جاري البحث... (تمت تجربة {self.progress_counter.value} كلمة سر) - {progress_percent:.1f}%")
+        self.root.after(500, self.check_for_result)
+
+    def stop_cracking(self, force=False):
+        if not self.is_running and not force: return
+        self.is_running = False
+        self.password_found_flag.set()
+        time.sleep(0.1)
+        for p in self.processes:
+            if p.is_alive():
+                p.terminate()
+                p.join(timeout=1)
+        self.processes = []
+        self.toggle_controls(is_running=False)
+        if not self.found_password_queue.qsize() > 0:
+             self.status_text.set("تم إيقاف العملية. جاهز للبدء من جديد.")
+
+    def toggle_controls(self, is_running):
+        state = "disabled" if is_running else "normal"
+        self.start_button.config(state=state)
+        self.browse_button.config(state=state)
+        self.stop_button.config(state="normal" if is_running else "disabled")
+
+def password_worker_com(file_path, start, end, password_found_flag, found_password_queue, progress_counter):
+    pythoncom.CoInitialize()
+    word_app = None
+    try:
+        word_app = win32com.client.Dispatch("Word.Application")
+        word_app.Visible = False
+
+        for i in range(start, end):
+            if password_found_flag.is_set():
+                break
+
+            password = f"{i:04d}"
+            
+            try:
+                word_app.Documents.Open(file_path, False, True, None, password)
+                password_found_flag.set()
+                found_password_queue.put(password)
+                word_app.ActiveDocument.Close(0)
+                break
+            except Exception:
+                with progress_counter.get_lock():
+                    progress_counter.value += 1
+                continue
+    finally:
+        if word_app:
+            word_app.Quit()
+        pythoncom.CoUninitialize()
+
+def main():
+    try:
+        multiprocessing.freeze_support()
+        root = tk.Tk()
+        app = WordCrackerApp(root)
         
-        const xmlString = await encryptionInfoFile.async('string');
-        const encryptionInfo = parseEncryptionInfo(xmlString);
-        
-        startCracking(encryptionInfo);
+        def on_closing():
+            if app.is_running:
+                if messagebox.askokcancel("خروج", "عملية البحث لا تزال جارية. هل أنت متأكد أنك تريد الخروج؟"):
+                    app.stop_cracking(force=True)
+                    root.destroy()
+            else:
+                root.destroy()
 
-    } catch (error) {
-        let userFriendlyError = "حدث خطأ غير متوقع.";
-        if (error.message.includes("Can't find end of central directory")) {
-            userFriendlyError = `
-                <div class="p-4 bg-red-100 border-r-4 border-red-500 text-red-800 rounded-lg" role="alert">
-                    <p class="font-bold">خطأ: الملف غير متوافق!</p>
-                    <p class="mt-2 text-sm">هذا الخطأ يحدث لأن الملف لم يتم حفظه بالطريقة الصحيحة.</p>
-                    <p class="mt-2 text-sm"><strong>الحل:</strong> الرجاء العودة إلى <strong>الخطوة رقم 1</strong> واتباع التعليمات بدقة لحفظ نسخة "نظيفة" من الملف ثم حاول مرة أخرى.</p>
-                </div>
-            `;
-            statusArea.innerHTML = userFriendlyError;
-        } else {
-             statusArea.innerHTML = `<div class="text-red-600">${error.message}</div>`;
-        }
-        resetUI();
-    }
-});
+        root.protocol("WM_DELETE_WINDOW", on_closing)
+        root.mainloop()
+    except Exception as e:
+        messagebox.showerror("خطأ فادح عند بدء التشغيل", f"حدث خطأ يمنع البرنامج من العمل:\n\n{e}\n\nتأكد من تثبيت Microsoft Word ومكتبة pywin32.")
 
-function renderStatusUI() {
-    statusArea.innerHTML = `
-        <div class="space-y-4 pt-4">
-            <div id="status-message" class="text-center text-gray-600 bg-gray-100 p-4 rounded-lg"></div>
-            <div style="direction: ltr;" class="w-full bg-gray-200 rounded-full h-4">
-                <div id="progress-bar" class="bg-green-500 h-4 rounded-full transition-all duration-300" style="width: 0%"></div>
-            </div>
-            <div id="stats" class="text-sm text-center text-gray-500"></div>
-            <button id="stop-button" class="w-full bg-red-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-700 transition-all shadow-md text-md">إيقاف البحث</button>
-        </div>
-    `;
-    document.getElementById('stop-button').addEventListener('click', () => {
-        document.getElementById('status-message').textContent = 'تم إيقاف البحث من قبل المستخدم.';
-        terminateWorkers();
-        resetUI();
-    });
-}
-
-function resetUI() {
-    startButton.disabled = true;
-    activateStep(step2);
-}
-
-function parseEncryptionInfo(xmlString) {
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlString, "application/xml");
-    const keyData = xmlDoc.getElementsByTagName('keyData')[0];
-    const encryptedKey = xmlDoc.getElementsByTagName('encryptedKey')[0];
-    if (!keyData || !encryptedKey) throw new Error("فشل في تحليل معلومات التشفير.");
-    return {
-        salt: CryptoJS.enc.Base64.parse(keyData.getAttribute('saltValue')),
-        hashAlgorithm: keyData.getAttribute('hashAlgorithm'),
-        spinCount: parseInt(encryptedKey.getAttribute('spinCount')),
-        encryptedVerifierHashInput: CryptoJS.enc.Base64.parse(encryptedKey.getAttribute('encryptedVerifierHashInput')),
-        encryptedVerifierHashValue: CryptoJS.enc.Base64.parse(encryptedKey.getAttribute('encryptedVerifierHashValue')),
-    };
-}
-
-function startCracking(encryptionInfo) {
-    const numWorkers = navigator.hardwareConcurrency || 4;
-    const chunkSize = Math.ceil(totalPasswords / numWorkers);
-    startTime = Date.now();
-    document.getElementById('status-message').textContent = `بدء البحث باستخدام ${numWorkers} من أنوية المعالج...`;
-
-    const workerCode = `
-        importScripts("https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js");
-        onmessage = function(e) {
-            const { start, end, encryptionInfo } = e.data;
-            const { salt, hashAlgorithm, spinCount, encryptedVerifierHashInput, encryptedVerifierHashValue } = encryptionInfo;
-            const hasher = hashAlgorithm === 'SHA-512' ? CryptoJS.SHA512 : CryptoJS.SHA1;
-            for (let i = start; i < end; i++) {
-                const password = String(i).padStart(4, '0');
-                try {
-                    const passwordUtf16 = CryptoJS.enc.Utf16LE.parse(password);
-                    const h = hasher(salt.clone().concat(passwordUtf16));
-                    const key = CryptoJS.PBKDF2(h, CryptoJS.enc.Hex.parse('fea7d2763b4b9e79'), { keySize: 32/4, iterations: spinCount, hasher: hasher });
-                    const verifierHashKey = CryptoJS.PBKDF2(key, CryptoJS.enc.Hex.parse('146e0be7abacd0d6'), { keySize: 32/4, iterations: 2, hasher: hasher });
-                    const verifierKey16 = CryptoJS.lib.WordArray.create(verifierHashKey.words.slice(0, 4));
-                    const decryptedVerifierHashInput = CryptoJS.AES.decrypt({ciphertext: encryptedVerifierHashInput}, verifierKey16, { mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.NoPadding });
-                    const h_final = hasher(decryptedVerifierHashInput);
-                    const decryptedVerifierHashValue = CryptoJS.AES.decrypt({ciphertext: encryptedVerifierHashValue}, verifierKey16, { mode: CryptoJS.mode.ECB, padding: CryptoJS.pad.NoPadding });
-                    const finalHashWords = CryptoJS.lib.WordArray.create(h_final.words.slice(0, h_final.sigBytes / 4));
-                    if (finalHashWords.toString() === decryptedVerifierHashValue.toString(CryptoJS.enc.Hex).substring(0, finalHashWords.toString().length)) {
-                        postMessage({ status: 'found', password: password });
-                        return;
-                    }
-                } catch (err) {}
-                postMessage({ status: 'progress', count: 1 });
-            }
-            postMessage({ status: 'done' });
-        }
-    `;
-    const blob = new Blob([workerCode], { type: 'application/javascript' });
-    const workerUrl = URL.createObjectURL(blob);
-
-    workers = [];
-    for (let i = 0; i < numWorkers; i++) {
-        const start = i * chunkSize;
-        const end = Math.min(start + chunkSize, totalPasswords);
-        const worker = new Worker(workerUrl);
-        worker.onmessage = (e) => handleWorkerMessage(e.data);
-        worker.postMessage({ start, end, encryptionInfo });
-        workers.push(worker);
-    }
-}
-
-function handleWorkerMessage(data) {
-    if (passwordFound) return;
-    if (data.status === 'found') {
-        passwordFound = true;
-        terminateWorkers();
-        const endTime = Date.now();
-        const duration = ((endTime - startTime) / 1000).toFixed(2);
-        statusArea.innerHTML = `
-            <div class="text-center p-6 bg-green-100 border-2 border-green-500 rounded-lg">
-                <h2 class="text-2xl font-bold text-green-800">🎉 تم العثور على كلمة السر في ${duration} ثانية! 🎉</h2>
-                <p class="mt-4 text-4xl font-bold text-gray-800 bg-white py-4 rounded-lg shadow-inner">${data.password}</p>
-            </div>
-        `;
-        resetUI();
-    } else if (data.status === 'progress') {
-        updateProgress(data.count);
-    }
-}
-
-function updateProgress(count) {
-    if (passwordFound) return;
-    checkedPasswords += count;
-    const progress = (checkedPasswords / totalPasswords) * 100;
-    const progressBar = document.getElementById('progress-bar');
-    const stats = document.getElementById('stats');
-    if(progressBar) progressBar.style.width = `${Math.min(progress, 100)}%`;
-    
-    const elapsedTime = (Date.now() - startTime) / 1000;
-    if (elapsedTime > 0.5 && stats) {
-        const speed = Math.round(checkedPasswords / elapsedTime);
-        stats.textContent = `سرعة البحث: ${speed} كلمة سر/ثانية | المحاولات: ${checkedPasswords}/${totalPasswords}`;
-    }
-}
-
-function terminateWorkers() {
-    workers.forEach(worker => worker.terminate());
-    workers = [];
-}
-
-// Initial state
-activateStep(step1);
-
-</script>
-</body>
-</html>
+if __name__ == "__main__":
+    main()
